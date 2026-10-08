@@ -546,6 +546,7 @@
         audio.addEventListener("loadedmetadata", () => {
           player.duration = Math.max(player.duration, audio.duration || 0);
           player.tracks.forEach(item => drawTrackWave(player, item));
+          updateLoadingProgress(player);
           if (player.pendingSeekProgress !== null && player.tracks.every(item => item.audio.readyState >= 1)) {
             const time = player.pendingSeekProgress * player.duration;
             player.pendingSeekProgress = null;
@@ -583,11 +584,13 @@
         audio.addEventListener("timeupdate", () => {
           if (activePlayer !== player || !player.duration) return;
           drawTrackWave(player, player.tracks.find(item => item.audio === audio));
+          updateLoadingProgress(player);
         });
+        audio.addEventListener("progress", () => updateLoadingProgress(player));
         audio.addEventListener("waiting", () => {
           if (!player.hasStarted || !player.isPlaying || player.isBuffering) return;
           player.isBuffering = true;
-          player.status.textContent = "網路緩衝中，音軌已同步暫停…";
+          updateLoadingProgress(player);
           player.tracks.forEach(track => track.audio.pause());
           cancelAnimationFrame(animationFrame);
         });
@@ -660,6 +663,25 @@
       });
     }
 
+    function updateLoadingProgress(player) {
+      if (!player.isLoading && !player.isBuffering) return;
+
+      const bufferedPercentages = player.tracks.map(({ audio }) => {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) return 0;
+        let bufferedSeconds = 0;
+        for (let index = 0; index < audio.buffered.length; index++) {
+          bufferedSeconds += audio.buffered.end(index) - audio.buffered.start(index);
+        }
+        return Math.min(100, Math.floor(bufferedSeconds / audio.duration * 100));
+      });
+      const percent = bufferedPercentages.length
+        ? Math.min(...bufferedPercentages)
+        : 0;
+      player.status.textContent = player.isBuffering
+        ? `網路緩衝中：${percent}%（音軌已同步暫停…）`
+        : `正在載入音軌：${percent}%`;
+    }
+
     function resumeBufferedPlayer(player) {
       if (!player.isBuffering || !player.isPlaying || player.resumePending) return;
       if (player.tracks.some(track => track.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) return;
@@ -703,7 +725,7 @@
       const playButton = player.card.querySelector(".play");
       player.isLoading = true;
       playButton.disabled = true;
-      player.status.textContent = "正在載入音軌…";
+      updateLoadingProgress(player);
 
       try {
         setupAudioGraph();
@@ -729,7 +751,7 @@
         animateWave(player);
         if (player.tracks.some(track => track.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) {
           player.isBuffering = true;
-          player.status.textContent = "網路緩衝中，音軌已同步暫停…";
+          updateLoadingProgress(player);
           player.tracks.forEach(track => track.audio.pause());
           resumeBufferedPlayer(player);
         }
