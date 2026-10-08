@@ -444,6 +444,7 @@
   </script>
 
   <script>
+    const AUDIO_BASE_URL = "https://pub-7780bce18d554de2b22e497e57799d4b.r2.dev/";
     const songs = [
       {
         title: "最後一個 To Her",
@@ -546,6 +547,7 @@
         card.querySelector(".track-list").append(row);
         const track = {
           key, src, audio, gain: null, volume: 1, canvas: trackCanvas,
+          url: new URL(src, AUDIO_BASE_URL).href,
           peaks: new Float32Array(0), objectUrl: null, loadPromise: null,
           loadedBytes: 0, totalBytes: 0
         };
@@ -638,7 +640,7 @@
       if (!track.loadPromise) {
         track.loadPromise = (async () => {
           player.loadingTrack = track;
-          const response = await fetch(track.src, { signal });
+          const response = await fetch(track.url, { signal });
           if (!response.ok) throw new Error(`音檔載入失敗（HTTP ${response.status}）：${track.src}`);
 
           const contentLength = Number(response.headers.get("content-length"));
