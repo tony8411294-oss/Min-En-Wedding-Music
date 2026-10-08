@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#edf7ff">
+  <meta name="description" content="婚禮歌曲分軌播放器，每首歌都能獨立調整人聲、鼓與其他音軌。">
+  <title>婚禮歌曲</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+      background: #f5faff;
+      color: #263c4e;
+      font-synthesis: none;
+      --muted: #71889a;
+      --surface: #ffffff;
+      --line: #dcebf5;
+      --accent: #78b8e3;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background:
+        radial-gradient(ellipse at 50% -20%, #e9f5ff 0, transparent 58%),
+        #f5faff;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .hero {
+      position: relative;
+      display: grid;
+      width: 100%;
+      aspect-ratio: 10 / 3;
+      min-height: 0;
+      overflow: hidden;
+      place-items: center;
+      background: #496778;
+      color: #fffdf7;
+      text-align: center;
+    }
+
+    .hero-photo,
+    .hero-shade {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .hero-photo { object-fit: contain; object-position: center; }
+
+    .hero-shade {
+      background: linear-gradient(180deg, #10253221 0%, #10253240 46%, #0c202f99 100%);
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      width: min(100% - 36px, 800px);
+      padding: 40px 0 max(48px, env(safe-area-inset-bottom));
+      text-shadow: 0 2px 24px #132b3b66;
+    }
+
+    .hero-shade,
+    .hero-content { display: none; }
+
+    .playlist-intro { display: none; }
+
+    .hero-eyebrow,
+    .hero-scroll {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+
+    .hero-eyebrow { margin: 0 0 18px; }
+
+    .hero h1 {
+      margin: 0;
+      font-family: "Songti TC", "Noto Serif TC", Georgia, serif;
+      font-size: clamp(54px, 13vw, 100px);
+      font-weight: 400;
+      letter-spacing: .06em;
+      line-height: 1.15;
+    }
+
+    .hero-subtitle {
+      margin: 17px 0 0;
+      font-family: "Songti TC", "Noto Serif TC", Georgia, serif;
+      font-size: clamp(17px, 4.5vw, 24px);
+      font-style: italic;
+      letter-spacing: .03em;
+    }
+
+    .hero-scroll {
+      display: inline-flex;
+      align-items: center;
+      gap: 13px;
+      margin-top: clamp(80px, 19vh, 170px);
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .hero-scroll::before {
+      width: 34px;
+      height: 1px;
+      background: currentColor;
+      content: "";
+    }
+
+    .page {
+      width: 100%;
+      padding: 48px 0 max(36px, env(safe-area-inset-bottom));
+    }
+
+    .playlist-intro {
+      padding: 0 20px 28px;
+      text-align: center;
+    }
+
+    .eyebrow {
+      margin: 0 0 9px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .18em;
+    }
+
+    .playlist-intro h2 {
+      margin: 0;
+      font-size: clamp(27px, 7vw, 40px);
+      letter-spacing: -.045em;
+      line-height: 1.15;
+    }
+
+    .intro {
+      margin: 10px auto 0;
+      max-width: 520px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .song-list { display: grid; gap: 16px; }
+
+    .song {
+      width: 100%;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: 0 5px 18px #4f82a20b;
+    }
+
+    .song-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px 14px;
+    }
+
+    .song-heading { flex: 1; min-width: 0; }
+
+    .song-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .song-number {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .14em;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -.025em;
+      line-height: 1.3;
+    }
+
+    .artist {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .track-count {
+      flex: none;
+      margin-top: 3px;
+      padding: 5px 9px;
+      border: 1px solid #d7e8f4;
+      border-radius: 999px;
+      color: #647c90;
+      font-size: 11px;
+    }
+
+    .play {
+      display: grid;
+      flex: none;
+      width: 46px;
+      height: 46px;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #ffffff;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .play:active { transform: scale(.96); }
+    .play svg { width: 19px; height: 19px; fill: currentColor; }
+    .play .pause-icon { display: none; }
+    .play[aria-label="暫停"] .play-icon { display: none; }
+    .play[aria-label="暫停"] .pause-icon { display: block; }
+
+    .track-list { display: grid; gap: 1px; }
+
+    .track {
+      display: grid;
+      grid-template-columns: minmax(58px, .7fr) minmax(90px, 1.8fr) 40px;
+      align-items: center;
+      column-gap: 12px;
+      padding: 9px 0 12px;
+      border-top: 1px solid #e8f0f6;
+    }
+
+    .track-name { color: #29475e; font-size: 14px; font-weight: 650; }
+    .track-wave {
+      display: block;
+      grid-column: 1 / -1;
+      width: 100%;
+      height: 54px;
+      border-radius: 6px;
+      background: #f2f8fc;
+      cursor: crosshair;
+      touch-action: pan-y;
+    }
+    .track-value {
+      color: #547087;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .volume {
+      width: 100%;
+      height: 28px;
+      margin: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+      touch-action: pan-x;
+    }
+
+    .status {
+      min-height: 17px;
+      padding: 0 20px 13px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .status:empty { display: none; }
+
+    @media (min-width: 700px) {
+      .hero-content { padding-bottom: 48px; }
+      .page { padding-top: 70px; }
+      .playlist-intro { padding-bottom: 40px; }
+      .song-list { gap: 22px; }
+      .song-head { padding: 22px 32px 17px; }
+      .status { padding-right: 32px; padding-left: 32px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+
+    @media (max-width: 699px), (max-height: 500px) {
+      html,
+      body {
+        width: 100%;
+        height: 100vh;
+        height: 100svh;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      body { display: flex; flex-direction: column; }
+
+      .hero { flex: none; height: auto; }
+      .hero-photo { object-fit: contain; object-position: center; }
+
+      .page {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-height: 0;
+        padding: 0 0 max(3px, env(safe-area-inset-bottom));
+      }
+
+      .song-number,
+      .artist,
+      .track-count { display: none; }
+      .playlist-intro h2 {
+        font-size: clamp(15px, 4.3vw, 19px);
+        letter-spacing: 0;
+        line-height: 1.2;
+      }
+
+      .song-list {
+        display: grid;
+        flex: 1;
+        grid-auto-rows: minmax(0, 1fr);
+        grid-template-rows: 2fr 3fr 3fr;
+        gap: clamp(3px, .6svh, 6px);
+        min-height: 0;
+      }
+
+      .song {
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        border: 1px solid #dcebf5;
+        border-radius: 11px;
+        background: linear-gradient(145deg, #ffffff, #fbfdff);
+        box-shadow: 0 2px 10px #6389a30c;
+      }
+
+      .song-head {
+        flex: none;
+        align-items: center;
+        min-height: 0;
+        padding: 2px 9px;
+        border-bottom: 1px solid #edf3f8;
+      }
+
+      .song-heading { min-width: 0; }
+      .song-title-row { gap: 6px; }
+      .song-title-row > div { min-width: 0; }
+      h2 {
+        overflow: hidden;
+        font-size: clamp(10px, 3.3vw, 13px);
+        letter-spacing: -.02em;
+        line-height: 1.1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .play { width: 23px; height: 23px; }
+      .play svg { width: 11px; height: 11px; }
+      .track-list {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        justify-content: space-evenly;
+      }
+
+      .track {
+        display: grid;
+        flex: 0 0 auto;
+        grid-template-columns: minmax(34px, max-content) minmax(0, 1fr) 27px;
+        grid-template-rows: 14px clamp(18px, 3svh, 26px);
+        align-content: stretch;
+        align-items: center;
+        gap: 3px 5px;
+        min-height: 0;
+        padding: 1px 9px 2px;
+        border-top-color: #edf3f8;
+      }
+
+      .track-name { font-size: 9px; line-height: 1; }
+      .volume { height: 14px; }
+      .track-value { font-size: 8px; line-height: 1; }
+      .track-wave {
+        height: clamp(18px, 3svh, 26px);
+        min-height: 0;
+        border-radius: 4px;
+      }
+      .status { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero" aria-label="婚紗照與婚禮歌曲標題">
+    <img class="hero-photo" src="./選用.png" alt="Min & En 婚禮音樂表演">
+    <div class="hero-shade"></div>
+    <div class="hero-content">
+      <p class="hero-eyebrow">A celebration of love</p>
+      <h1>婚禮歌曲</h1>
+      <p class="hero-subtitle">為我們的重要時刻，留下最喜歡的旋律</p>
+      <a class="hero-scroll" href="#songs">Scroll to the music</a>
+    </div>
+  </section>
+  <main class="page">
+    <header class="playlist-intro">
+      <p class="eyebrow">OUR WEDDING PLAYLIST</p>
+      <h2>婚禮裡的每一首歌</h2>
+      <p class="intro">每一軌都能單獨調整音量；點擊波形，從想聽的段落開始播放。</p>
+    </header>
+    <section class="song-list" id="songs" aria-label="婚禮歌曲清單"></section>
+  </main>
+
+  <script>
+    let trackWaveforms = null;
+    fetch("./waveforms.json")
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        trackWaveforms = data;
+        players.forEach(player => {
+          player.tracks.forEach(track => {
+            const peaks = data[track.src];
+            if (!peaks) throw new Error(`找不到音軌波形資料：${track.src}`);
+            track.peaks = Float32Array.from(peaks, value => value / 255);
+            drawTrackWave(player, track);
+          });
+        });
+      })
+      .catch(error => {
+        players.forEach(player => {
+          player.status.textContent = `完整波形預覽載入失敗：${error.message}`;
+        });
+      });
+  </script>
+
+  <script>
+    const songs = [
+      {
+        title: "最後一個 To Her",
+        artist: "滅火器 Fire EX.",
+        tracks: [
+          ["vocal", "人聲", "滅火器 Fire EX. - 最後一個 To Her - vocal.mp3"],
+          ["others", "其他", "滅火器 Fire EX. - 最後一個 To Her - others.mp3"]
+        ]
+      },
+      {
+        title: "Wherever you are",
+        artist: "ONE OK ROCK",
+        tracks: [
+          ["vocal", "人聲", "Wherever you are - vocal.mp3"],
+          ["drum", "鼓", "Wherever you are - drum.mp3"],
+          ["others", "其他", "Wherever you are - others.mp3"]
+        ]
+      },
+      {
+        title: "我喜歡你",
+        artist: "芒果醬 Mango Jump",
+        tracks: [
+          ["vocal", "人聲", "芒果醬 Mango Jump_我喜歡你 - vocal.mp3"],
+          ["drum", "鼓", "芒果醬 Mango Jump_我喜歡你 - drum.mp3"],
+          ["others", "其他", "芒果醬 Mango Jump_我喜歡你 - others.mp3"]
+        ]
+      }
+    ];
+
+    const playIcon = '<svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.8c0-.8.9-1.3 1.6-.9l9.1 5.2a1 1 0 0 1 0 1.8l-9.1 5.2a1 1 0 0 1-1.6-.9z"/></svg>';
+    const pauseIcon = '<svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zm6.5 0H17v14h-3.5z"/></svg>';
+    const players = [];
+    let audioContext;
+    let activePlayer = null;
+    let animationFrame = 0;
+
+    function renderSong(song, index) {
+      const card = document.createElement("article");
+      card.className = "song";
+      card.innerHTML = `
+        <header class="song-head">
+          <div class="song-heading">
+            <span class="song-number">TRACK ${String(index + 1).padStart(2, "0")}</span>
+            <div class="song-title-row">
+              <div>
+                <h2></h2>
+                <p class="artist"></p>
+              </div>
+              <button class="play" type="button" aria-label="播放">${playIcon}${pauseIcon}</button>
+            </div>
+          </div>
+          <span class="track-count">${song.tracks.length} 軌</span>
+        </header>
+        <div class="track-list"></div>
+        <div class="status" role="status" aria-live="polite"></div>`;
+      card.querySelector("h2").textContent = song.title;
+      card.querySelector(".artist").textContent = song.artist;
+
+      const player = {
+        card,
+        tracks: [],
+        duration: 0,
+        pendingSeekProgress: null,
+        status: card.querySelector(".status")
+      };
+
+      for (const [key, label, src] of song.tracks) {
+        const audio = new Audio(src);
+        audio.preload = "metadata";
+        audio.addEventListener("error", () => {
+          player.status.textContent = `音檔無法載入：${src}`;
+        });
+
+        const row = document.createElement("div");
+        row.className = "track";
+        row.innerHTML = `<span class="track-name"></span><input class="volume" type="range" min="0" max="100" value="100" aria-label="${label}音量"><span class="track-value">100%</span><canvas class="track-wave"></canvas>`;
+        row.querySelector(".track-name").textContent = label;
+        const trackCanvas = row.querySelector(".track-wave");
+        trackCanvas.setAttribute("aria-label", `點擊${label}波形跳轉並播放`);
+        trackCanvas.setAttribute("role", "button");
+        trackCanvas.tabIndex = 0;
+        row.querySelector(".volume").addEventListener("input", event => {
+          const volume = Number(event.target.value) / 100;
+          const track = player.tracks.find(item => item.key === key);
+          track.volume = volume;
+          if (track.gain) track.gain.gain.value = volume;
+          row.querySelector(".track-value").textContent = `${event.target.value}%`;
+        });
+        card.querySelector(".track-list").append(row);
+        const track = { key, src, audio, gain: null, volume: 1, canvas: trackCanvas, peaks: new Float32Array(0) };
+        player.tracks.push(track);
+
+        audio.addEventListener("loadedmetadata", () => {
+          player.duration = Math.max(player.duration, audio.duration || 0);
+          player.tracks.forEach(item => drawTrackWave(player, item));
+          if (player.pendingSeekProgress !== null && player.tracks.every(item => item.audio.readyState >= 1)) {
+            const time = player.pendingSeekProgress * player.duration;
+            player.pendingSeekProgress = null;
+            seekPlayer(player, time);
+          }
+        }, { once: true });
+      }
+
+      card.querySelector(".play").addEventListener("click", () => togglePlayback(player));
+      player.tracks.forEach(track => {
+        track.canvas.title = "點擊波形跳轉並播放";
+        const seekAndPlay = async event => {
+          const bounds = track.canvas.getBoundingClientRect();
+          const progress = Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width));
+          if (player.duration && player.tracks.every(item => item.audio.readyState >= 1)) {
+            seekPlayer(player, progress * player.duration);
+          } else {
+            player.pendingSeekProgress = progress;
+          }
+          if (activePlayer !== player || player.tracks[0].audio.paused) {
+            await togglePlayback(player);
+          }
+        };
+        track.canvas.addEventListener("click", seekAndPlay);
+        track.canvas.addEventListener("keydown", event => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          if (activePlayer !== player || player.tracks[0].audio.paused) {
+            togglePlayback(player);
+          }
+        });
+      });
+
+      for (const { audio } of player.tracks) {
+        audio.addEventListener("timeupdate", () => {
+          if (activePlayer !== player || !player.duration) return;
+          drawTrackWave(player, player.tracks.find(item => item.audio === audio));
+        });
+        audio.addEventListener("ended", () => {
+          if (activePlayer === player && player.tracks.every(track => track.audio.ended || track.audio.paused)) {
+            stopPlayer(player);
+          }
+        });
+      }
+
+      players.push(player);
+      return card;
+    }
+
+    function setupAudioGraph() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        players.forEach(player => {
+          player.analyser = audioContext.createAnalyser();
+          player.analyser.fftSize = 2048;
+          player.tracks.forEach(track => {
+            track.source = audioContext.createMediaElementSource(track.audio);
+            track.gain = audioContext.createGain();
+            track.analyser = audioContext.createAnalyser();
+            track.analyser.fftSize = 2048;
+            track.samples = new Uint8Array(track.analyser.fftSize);
+            track.gain.gain.value = track.volume;
+            track.source.connect(track.gain).connect(track.analyser);
+            track.analyser.connect(player.analyser);
+          });
+          player.analyser.connect(audioContext.destination);
+        });
+      }
+    }
+
+    async function togglePlayback(player) {
+      if (activePlayer === player && !player.tracks[0].audio.paused) {
+        player.tracks.forEach(({ audio }) => audio.pause());
+        player.card.querySelector(".play").setAttribute("aria-label", "播放");
+        cancelAnimationFrame(animationFrame);
+        return;
+      }
+
+      players.forEach(other => {
+        if (other !== player) stopPlayer(other);
+      });
+      activePlayer = player;
+
+      try {
+        setupAudioGraph();
+        await audioContext.resume();
+        const startTime = player.tracks[0].audio.currentTime;
+        player.tracks.forEach(({ audio }) => {
+          if (audio.ended || Math.abs(audio.currentTime - startTime) > 0.2) {
+            audio.currentTime = startTime;
+          }
+        });
+        await Promise.all(player.tracks.map(({ audio }) => audio.play()));
+        player.card.querySelector(".play").setAttribute("aria-label", "暫停");
+        player.status.textContent = "";
+        animateWave(player);
+      } catch (error) {
+        stopPlayer(player);
+        player.status.textContent = `播放失敗：${error.message}`;
+      }
+    }
+
+    function stopPlayer(player) {
+      player.tracks.forEach(({ audio }) => audio.pause());
+      player.card.querySelector(".play").setAttribute("aria-label", "播放");
+      if (activePlayer === player) activePlayer = null;
+      cancelAnimationFrame(animationFrame);
+    }
+
+    function seekPlayer(player, time) {
+      player.tracks.forEach(({ audio }) => {
+        if (Number.isFinite(audio.duration)) audio.currentTime = Math.min(time, audio.duration);
+      });
+      player.tracks.forEach(track => drawTrackWave(player, track));
+    }
+
+    function drawTrackWave(player, track, data) {
+      const canvas = track.canvas;
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+      const height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const context = canvas.getContext("2d");
+      context.clearRect(0, 0, width, height);
+      const middle = height / 2;
+      const bins = track.peaks.length;
+      if (data && bins) {
+        const sampleStep = Math.max(1, Math.floor(data.length / 128));
+        let level = 0;
+        for (let i = 0; i < data.length; i += sampleStep) {
+          level += Math.abs(data[i] - 128);
+        }
+        level = Math.min(1, level / Math.ceil(data.length / sampleStep) / 64);
+        const bucket = Math.min(bins - 1, Math.floor(track.audio.currentTime / player.duration * bins));
+        track.peaks[bucket] = Math.max(track.peaks[bucket], level);
+      }
+
+      const played = player.duration
+        ? track.audio.currentTime / player.duration
+        : 0;
+      const bucketWidth = width / Math.max(1, bins);
+      for (let x = 0; x < width; x += ratio * 2) {
+        const first = Math.floor(x / bucketWidth);
+        const last = Math.min(bins, Math.ceil((x + ratio * 2) / bucketWidth));
+        let value = 0;
+        for (let i = first; i < last; i++) value = Math.max(value, track.peaks[i]);
+        const barHeight = Math.max(2 * ratio, value * height * .9);
+          context.fillStyle = x / width <= played ? "#78b8e3" : "#bfd8e9";
+        context.fillRect(x, middle - barHeight / 2, ratio, barHeight);
+      }
+      context.fillStyle = "#174e73";
+      context.fillRect(played * width, 0, Math.max(1, ratio), height);
+    }
+
+    function animateWave(player) {
+      cancelAnimationFrame(animationFrame);
+      const frame = () => {
+        if (activePlayer !== player || player.tracks[0].audio.paused) return;
+        player.tracks.forEach(track => {
+          track.analyser.getByteTimeDomainData(track.samples);
+          drawTrackWave(player, track, track.samples);
+        });
+        animationFrame = requestAnimationFrame(frame);
+      };
+      frame();
+    }
+
+    songs.forEach((song, index) => {
+      document.querySelector("#songs").append(renderSong(song, index));
+    });
+    document.querySelector("#songs").style.gridTemplateRows =
+      songs.map(song => `${song.tracks.length}fr`).join(" ");
+
+    window.addEventListener("resize", () => players.forEach(player => {
+      player.tracks.forEach(track => drawTrackWave(player, track));
+    }));
+  </script>
+</body>
+</html>
