@@ -390,13 +390,17 @@
         min-height: 0;
         border-radius: 4px;
       }
-      .status { display: none; }
+      .status {
+        min-height: 0;
+        padding: 0 9px 3px;
+        font-size: 9px;
+      }
     }
   </style>
 </head>
 <body>
   <section class="hero" aria-label="婚紗照與婚禮歌曲標題">
-    <img class="hero-photo" src="./選用.png" alt="Min & En 婚禮音樂表演">
+    <img class="hero-photo" src="./選用.webp" alt="Min & En 婚禮音樂表演" fetchpriority="high" decoding="async">
     <div class="hero-shade"></div>
     <div class="hero-content">
       <p class="hero-eyebrow">A celebration of love</p>
@@ -503,13 +507,20 @@
         tracks: [],
         duration: 0,
         pendingSeekProgress: null,
-        status: card.querySelector(".status")
+        status: card.querySelector(".status"),
+        isLoading: false,
+        isPlaying: false,
+        isBuffering: false,
+        hasStarted: false,
+        resumePending: false,
+        operationId: 0
       };
 
       for (const [key, label, src] of song.tracks) {
-        const audio = new Audio(src);
-        audio.preload = "metadata";
+        const audio = new Audio();
+        audio.preload = "none";
         audio.addEventListener("error", () => {
+          if (activePlayer === player) stopPlayer(player);
           player.status.textContent = `音檔無法載入：${src}`;
         });
 
@@ -573,6 +584,14 @@
           if (activePlayer !== player || !player.duration) return;
           drawTrackWave(player, player.tracks.find(item => item.audio === audio));
         });
+        audio.addEventListener("waiting", () => {
+          if (!player.hasStarted || !player.isPlaying || player.isBuffering) return;
+          player.isBuffering = true;
+          player.status.textContent = "網路緩衝中，音軌已同步暫停…";
+          player.tracks.forEach(track => track.audio.pause());
+          cancelAnimationFrame(animationFrame);
+        });
+        audio.addEventListener("canplay", () => resumeBufferedPlayer(player));
         audio.addEventListener("ended", () => {
           if (activePlayer === player && player.tracks.every(track => track.audio.ended || track.audio.paused)) {
             stopPlayer(player);
@@ -605,10 +624,73 @@
       }
     }
 
+    function waitUntilPlayable(track) {
+      const { audio, src } = track;
+      audio.preload = "auto";
+      if (!audio.src) {
+        audio.src = src;
+        audio.load();
+      }
+      if (audio.error) return Promise.reject(new Error(`音檔無法載入：${src}`));
+      if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve();
+
+      return new Promise((resolve, reject) => {
+        let timeoutId;
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          audio.removeEventListener("canplay", handleCanPlay);
+          audio.removeEventListener("error", handleError);
+        };
+        const handleCanPlay = () => {
+          cleanup();
+          resolve();
+        };
+        const handleError = () => {
+          cleanup();
+          reject(new Error(`音檔無法載入：${src}`));
+        };
+
+        audio.addEventListener("canplay", handleCanPlay);
+        audio.addEventListener("error", handleError);
+        timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error(`音檔載入逾時：${src}`));
+        }, 30000);
+        if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) handleCanPlay();
+      });
+    }
+
+    function resumeBufferedPlayer(player) {
+      if (!player.isBuffering || !player.isPlaying || player.resumePending) return;
+      if (player.tracks.some(track => track.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) return;
+
+      player.resumePending = true;
+      Promise.all(player.tracks.map(track => track.audio.play()))
+        .then(() => {
+          if (activePlayer !== player || !player.isPlaying) return;
+          player.isBuffering = false;
+          player.status.textContent = "";
+          animateWave(player);
+        })
+        .catch(error => {
+          if (activePlayer !== player || !player.isPlaying) return;
+          stopPlayer(player);
+          player.status.textContent = `播放失敗：${error.message}`;
+        })
+        .finally(() => {
+          player.resumePending = false;
+        });
+    }
+
     async function togglePlayback(player) {
-      if (activePlayer === player && !player.tracks[0].audio.paused) {
+      if (player.isLoading) return;
+      if (activePlayer === player && player.isPlaying) {
         player.tracks.forEach(({ audio }) => audio.pause());
+        player.isPlaying = false;
+        player.isBuffering = false;
+        player.hasStarted = false;
         player.card.querySelector(".play").setAttribute("aria-label", "播放");
+        player.status.textContent = "";
         cancelAnimationFrame(animationFrame);
         return;
       }
@@ -617,29 +699,63 @@
         if (other !== player) stopPlayer(other);
       });
       activePlayer = player;
+      const operationId = ++player.operationId;
+      const playButton = player.card.querySelector(".play");
+      player.isLoading = true;
+      playButton.disabled = true;
+      player.status.textContent = "正在載入音軌…";
 
       try {
         setupAudioGraph();
-        await audioContext.resume();
+        const resumePromise = audioContext.resume();
+        await Promise.all([
+          resumePromise,
+          ...player.tracks.map(waitUntilPlayable)
+        ]);
+        if (activePlayer !== player || player.operationId !== operationId) return;
+
         const startTime = player.tracks[0].audio.currentTime;
         player.tracks.forEach(({ audio }) => {
           if (audio.ended || Math.abs(audio.currentTime - startTime) > 0.2) {
             audio.currentTime = startTime;
           }
         });
+        player.isPlaying = true;
         await Promise.all(player.tracks.map(({ audio }) => audio.play()));
-        player.card.querySelector(".play").setAttribute("aria-label", "暫停");
+        if (activePlayer !== player || player.operationId !== operationId) return;
+        player.hasStarted = true;
+        playButton.setAttribute("aria-label", "暫停");
         player.status.textContent = "";
         animateWave(player);
+        if (player.tracks.some(track => track.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) {
+          player.isBuffering = true;
+          player.status.textContent = "網路緩衝中，音軌已同步暫停…";
+          player.tracks.forEach(track => track.audio.pause());
+          resumeBufferedPlayer(player);
+        }
       } catch (error) {
+        if (activePlayer !== player || player.operationId !== operationId) return;
         stopPlayer(player);
         player.status.textContent = `播放失敗：${error.message}`;
+      } finally {
+        if (player.operationId === operationId) {
+          player.isLoading = false;
+          playButton.disabled = false;
+        }
       }
     }
 
     function stopPlayer(player) {
+      player.operationId++;
+      player.isLoading = false;
+      player.isPlaying = false;
+      player.isBuffering = false;
+      player.hasStarted = false;
+      player.status.textContent = "";
       player.tracks.forEach(({ audio }) => audio.pause());
-      player.card.querySelector(".play").setAttribute("aria-label", "播放");
+      const playButton = player.card.querySelector(".play");
+      playButton.setAttribute("aria-label", "播放");
+      playButton.disabled = false;
       if (activePlayer === player) activePlayer = null;
       cancelAnimationFrame(animationFrame);
     }
