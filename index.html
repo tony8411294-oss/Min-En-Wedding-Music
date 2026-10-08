@@ -513,7 +513,6 @@
         isBuffering: false,
         hasStarted: false,
         resumePending: false,
-        loadController: null,
         operationId: 0
       };
 
@@ -543,7 +542,7 @@
         card.querySelector(".track-list").append(row);
         const track = {
           key, src, audio, gain: null, volume: 1, canvas: trackCanvas,
-          peaks: new Float32Array(0), objectUrl: null, loadedBytes: 0, totalBytes: null
+          peaks: new Float32Array(0)
         };
         player.tracks.push(track);
 
@@ -590,7 +589,10 @@
           drawTrackWave(player, player.tracks.find(item => item.audio === audio));
           updateLoadingProgress(player);
         });
-        audio.addEventListener("progress", () => updateLoadingProgress(player));
+        audio.addEventListener("progress", () => {
+          updateLoadingProgress(player);
+          resumeBufferedPlayer(player);
+        });
         audio.addEventListener("waiting", () => {
           if (!player.hasStarted || !player.isPlaying || player.isBuffering) return;
           player.isBuffering = true;
@@ -631,92 +633,72 @@
       }
     }
 
-    async function loadTrackCompletely(track, player, signal) {
-      if (!track.objectUrl) {
-        const response = await fetch(track.src, { signal });
-        if (!response.ok) throw new Error(`音檔載入失敗（HTTP ${response.status}）：${track.src}`);
+    const INITIAL_BUFFER_SECONDS = 3;
+    const RESUME_BUFFER_SECONDS = 1.5;
 
-        const contentLength = Number(response.headers.get("content-length"));
-        track.totalBytes = Number.isFinite(contentLength) && contentLength > 0
-          ? contentLength
-          : null;
-        track.loadedBytes = 0;
-
-        if (response.body) {
-          const reader = response.body.getReader();
-          const chunks = [];
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              chunks.push(value);
-              track.loadedBytes += value.byteLength;
-              updateLoadingProgress(player);
-            }
-          } finally {
-            reader.releaseLock();
-          }
-          const blob = new Blob(chunks, {
-            type: response.headers.get("content-type") || "audio/mpeg"
-          });
-          track.loadedBytes = blob.size;
-          if (!track.totalBytes) track.totalBytes = blob.size;
-          track.objectUrl = URL.createObjectURL(blob);
-        } else {
-          const blob = await response.blob();
-          track.loadedBytes = blob.size;
-          track.totalBytes = blob.size;
-          track.objectUrl = URL.createObjectURL(blob);
+    function getBufferedSecondsAhead(audio) {
+      for (let index = 0; index < audio.buffered.length; index++) {
+        const start = audio.buffered.start(index);
+        const end = audio.buffered.end(index);
+        if (audio.currentTime >= start && audio.currentTime <= end) {
+          return end - audio.currentTime;
         }
-        updateLoadingProgress(player);
       }
+      return 0;
+    }
 
+    function waitForInitialBuffer(track, player) {
       const { audio, src } = track;
       audio.preload = "auto";
-      if (!audio.src || audio.src !== track.objectUrl) {
-        audio.src = track.objectUrl;
+      if (!audio.src) {
+        audio.src = src;
         audio.load();
       }
-      if (audio.error) return Promise.reject(new Error(`音檔無法載入：${src}`));
-      if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve();
+      if (audio.ended) audio.currentTime = 0;
 
       return new Promise((resolve, reject) => {
         const cleanup = () => {
-          audio.removeEventListener("canplay", handleCanPlay);
+          audio.removeEventListener("loadedmetadata", checkBuffer);
+          audio.removeEventListener("progress", checkBuffer);
+          audio.removeEventListener("canplay", checkBuffer);
           audio.removeEventListener("error", handleError);
         };
-        const handleCanPlay = () => {
-          cleanup();
-          resolve();
+        const checkBuffer = () => {
+          updateLoadingProgress(player);
+          const requiredSeconds = Number.isFinite(audio.duration)
+            ? Math.min(INITIAL_BUFFER_SECONDS, Math.max(0, audio.duration - audio.currentTime))
+            : INITIAL_BUFFER_SECONDS;
+          if (getBufferedSecondsAhead(audio) >= requiredSeconds) {
+            cleanup();
+            resolve();
+          }
         };
         const handleError = () => {
           cleanup();
           reject(new Error(`音檔無法載入：${src}`));
         };
 
-        audio.addEventListener("canplay", handleCanPlay);
+        audio.addEventListener("loadedmetadata", checkBuffer);
+        audio.addEventListener("progress", checkBuffer);
+        audio.addEventListener("canplay", checkBuffer);
         audio.addEventListener("error", handleError);
-        if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) handleCanPlay();
+        checkBuffer();
       });
     }
 
     function updateLoadingProgress(player) {
       if (!player.isLoading) return;
 
-      const totalBytes = player.tracks.reduce((total, track) => total + (track.totalBytes || 0), 0);
-      const loadedBytes = player.tracks.reduce((total, track) => total + track.loadedBytes, 0);
-      if (totalBytes > 0 && player.tracks.every(track => track.totalBytes)) {
-        const percent = Math.min(100, Math.floor(loadedBytes / totalBytes * 100));
-        player.status.textContent = `正在完整下載音軌：${percent}%`;
-      } else {
-        const completedTracks = player.tracks.filter(track => track.objectUrl).length;
-        player.status.textContent = `正在完整下載音軌：已完成 ${completedTracks} / ${player.tracks.length} 軌`;
-      }
+      const percentages = player.tracks.map(({ audio }) =>
+        Math.min(100, Math.floor(getBufferedSecondsAhead(audio) / INITIAL_BUFFER_SECONDS * 100))
+      );
+      const percent = percentages.length ? Math.min(...percentages) : 0;
+      player.status.textContent = `正在準備音軌同步播放：${percent}%`;
     }
 
     function resumeBufferedPlayer(player) {
       if (!player.isBuffering || !player.isPlaying || player.resumePending) return;
-      if (player.tracks.some(track => track.audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA)) return;
+      if (player.tracks.some(track => getBufferedSecondsAhead(track.audio) < RESUME_BUFFER_SECONDS)) return;
 
       player.resumePending = true;
       Promise.all(player.tracks.map(track => track.audio.play()))
@@ -756,8 +738,6 @@
       const operationId = ++player.operationId;
       const playButton = player.card.querySelector(".play");
       player.isLoading = true;
-      const loadController = new AbortController();
-      player.loadController = loadController;
       playButton.disabled = true;
       updateLoadingProgress(player);
 
@@ -766,7 +746,7 @@
         const resumePromise = audioContext.resume();
         await Promise.all([
           resumePromise,
-          ...player.tracks.map(track => loadTrackCompletely(track, player, loadController.signal))
+          ...player.tracks.map(track => waitForInitialBuffer(track, player))
         ]);
         if (activePlayer !== player || player.operationId !== operationId) return;
 
@@ -798,7 +778,6 @@
       } finally {
         if (player.operationId === operationId) {
           player.isLoading = false;
-          player.loadController = null;
           playButton.disabled = false;
         }
       }
@@ -810,10 +789,6 @@
       player.isPlaying = false;
       player.isBuffering = false;
       player.hasStarted = false;
-      if (player.loadController) {
-        player.loadController.abort();
-        player.loadController = null;
-      }
       player.status.textContent = "";
       player.tracks.forEach(({ audio }) => audio.pause());
       const playButton = player.card.querySelector(".play");
