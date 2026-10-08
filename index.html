@@ -515,6 +515,8 @@
         resumePending: false,
         isSeeking: false,
         seekController: null,
+        loadController: null,
+        loadingTrack: null,
         operationId: 0
       };
 
@@ -632,10 +634,11 @@
       }
     }
 
-    async function loadTrackCompletely(track, player) {
+    async function loadTrackCompletely(track, player, signal) {
       if (!track.loadPromise) {
         track.loadPromise = (async () => {
-          const response = await fetch(track.src);
+          player.loadingTrack = track;
+          const response = await fetch(track.src, { signal });
           if (!response.ok) throw new Error(`音檔載入失敗（HTTP ${response.status}）：${track.src}`);
 
           const contentLength = Number(response.headers.get("content-length"));
@@ -674,10 +677,13 @@
           track.audio.src = track.objectUrl;
           track.audio.load();
           await waitForTrackMetadata(track);
+          player.loadingTrack = null;
+          updateLoadingProgress(player);
         })().catch(error => {
           if (track.objectUrl) URL.revokeObjectURL(track.objectUrl);
           track.loadPromise = null;
           track.objectUrl = null;
+          player.loadingTrack = null;
           throw error;
         });
       }
@@ -712,12 +718,24 @@
 
       const totalBytes = player.tracks.reduce((total, track) => total + track.totalBytes, 0);
       const loadedBytes = player.tracks.reduce((total, track) => total + track.loadedBytes, 0);
+      const track = player.loadingTrack;
+      const trackProgress = track && track.totalBytes > 0
+        ? `${Math.min(100, Math.floor(track.loadedBytes / track.totalBytes * 100))}%`
+        : track
+          ? `${(track.loadedBytes / 1048576).toFixed(1)} MB`
+          : "";
+      const trackLabel = track ? track.canvas.closest(".track").querySelector(".track-name").textContent : "";
+      const trackIndex = track ? player.tracks.indexOf(track) + 1 : 0;
       if (totalBytes > 0 && player.tracks.every(track => track.totalBytes > 0)) {
-        const percent = Math.min(100, Math.floor(loadedBytes / totalBytes * 100));
-        player.status.textContent = `正在完整載入所有音軌：${percent}%`;
+        const totalProgress = Math.min(100, Math.floor(loadedBytes / totalBytes * 100));
+        player.status.textContent = track
+          ? `正在載入第 ${trackIndex}/${player.tracks.length} 軌「${trackLabel}」：${trackProgress}（整首 ${totalProgress}%）`
+          : `正在準備音軌：${totalProgress}%`;
       } else {
         const completedTracks = player.tracks.filter(track => track.objectUrl).length;
-        player.status.textContent = `正在完整載入所有音軌：已完成 ${completedTracks} / ${player.tracks.length} 軌`;
+        player.status.textContent = track
+          ? `正在載入第 ${trackIndex}/${player.tracks.length} 軌「${trackLabel}」：${trackProgress}（已完成 ${completedTracks}/${player.tracks.length} 軌）`
+          : `正在準備音軌：已完成 ${completedTracks}/${player.tracks.length} 軌`;
       }
     }
 
@@ -763,16 +781,19 @@
       const operationId = ++player.operationId;
       const playButton = player.card.querySelector(".play");
       player.isLoading = true;
+      const loadController = new AbortController();
+      player.loadController = loadController;
       playButton.disabled = true;
       updateLoadingProgress(player);
 
       try {
         setupAudioGraph();
         const resumePromise = audioContext.resume();
-        await Promise.all([
-          resumePromise,
-          ...player.tracks.map(track => loadTrackCompletely(track, player))
-        ]);
+        await resumePromise;
+        for (const track of player.tracks) {
+          await loadTrackCompletely(track, player, loadController.signal);
+          if (activePlayer !== player || player.operationId !== operationId) return;
+        }
         if (activePlayer !== player || player.operationId !== operationId) return;
 
         const startTime = player.pendingSeekProgress !== null
@@ -800,30 +821,44 @@
       } catch (error) {
         if (player.operationId !== operationId) return;
         if (activePlayer !== player) return;
+        player.isLoading = false;
+        player.loadController = null;
+        player.loadingTrack = null;
         stopPlayer(player);
         player.status.textContent = `播放失敗：${error.message}`;
       } finally {
-        player.isLoading = false;
-        playButton.disabled = false;
-        if (activePlayer !== player) player.status.textContent = "";
+        if (player.operationId === operationId) {
+          player.isLoading = false;
+          player.loadController = null;
+          player.loadingTrack = null;
+          playButton.disabled = false;
+          if (activePlayer !== player && !player.status.textContent.startsWith("播放失敗：")) {
+            player.status.textContent = "";
+          }
+        }
       }
     }
 
     function stopPlayer(player) {
       player.operationId++;
+      player.isLoading = false;
       player.isPlaying = false;
       player.isBuffering = false;
       player.hasStarted = false;
       player.isSeeking = false;
+      if (player.loadController) {
+        player.loadController.abort();
+        player.loadController = null;
+      }
       if (player.seekController) {
         player.seekController.abort();
         player.seekController = null;
       }
-      if (!player.isLoading) player.status.textContent = "";
+      player.status.textContent = "";
       player.tracks.forEach(({ audio }) => audio.pause());
       const playButton = player.card.querySelector(".play");
       playButton.setAttribute("aria-label", "播放");
-      playButton.disabled = player.isLoading;
+      playButton.disabled = false;
       if (activePlayer === player) activePlayer = null;
       cancelAnimationFrame(animationFrame);
     }
